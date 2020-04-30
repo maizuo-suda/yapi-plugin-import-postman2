@@ -13,5 +13,9 @@
     "postman",
     "plugin",
     "import"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MrLeihe/yapi-plugin-import-postman2.git"
+  }
 }
