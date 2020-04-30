@@ -1,0 +1,17 @@
+{
+  "name": "yapi-plugin-import-postman2",
+  "version": "1.0.0",
+  "description": "import postmanV2 plugin for yapi",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "author": "stone",
+  "license": "MIT",
+  "keywords": [
+    "yapi",
+    "postman",
+    "plugin",
+    "import"
+  ]
+}
