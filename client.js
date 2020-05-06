@@ -8,6 +8,9 @@ const parseUrl = (url) => {
   return URL.parse(url)
 }
 
+/**
+ * 接口去重
+ */
 const checkInterRepeat = (requests) => {
   let obj = {}
   let arr = []
@@ -15,7 +18,7 @@ const checkInterRepeat = (requests) => {
   for (let i in requests) {
     const item = requests[i]
     const { url, method } = item.request
-    const requestUrl = url.row
+    const requestUrl = handleRequestUrl(url)
 
     if (!obj[requestUrl + '-' + method + '-' + method]) {
       arr.push(item)
@@ -35,9 +38,9 @@ const handleReq_query = (query) => {
     for (let i in query) {
       res.push({
         name: query[i].key,
-        desc: query[i].description,
         value: query[i].value,
-        required: query[i].disabled ? '0' : '1'
+        required: query[i].disabled ? '0' : '1',
+        desc: handleDescription(query[i].description)
       })
     }
   }
@@ -53,9 +56,9 @@ const handleReq_headers = (headers) => {
     for (let i in headers) {
       res.push({
         name: headers[i].key,
-        desc: headers[i].description,
         value: headers[i].value,
-        required: headers[i].disabled ? '0' : '1'
+        required: headers[i].disabled ? '0' : '1',
+        desc: handleDescription(headers[i].description)
       })
     }
   }
@@ -63,7 +66,7 @@ const handleReq_headers = (headers) => {
 }
 
 /**
- * formData
+ * formData 处理
  */
 const handleReq_body_form = (body) => {
   let res = []
@@ -80,7 +83,7 @@ const handleReq_body_form = (body) => {
       value: bodyForm[i].value,
       type: bodyForm[i].type,
       required: bodyForm[i].disabled ? '0' : '1',
-      desc: bodyForm[i].description
+      desc: handleDescription(bodyForm[i].description)
     })
   }
 
@@ -100,18 +103,40 @@ const handlePath = (path) => {
   return path
 }
 
+const handleRequestUrl = (url) => {
+  return _.isString(url) ? handlePath(url) : handlePath(url.raw)
+}
+
+const handleDescription = (description) => {
+  if (!description) {
+    return ''
+  }
+
+  return _.isObject(description) ? description.content : description
+}
+
 /**
- * 将接口和分类分离
+ * 筛选接口列表和分类列表
  */
-const splitItemAndFolder = (items) => {
+const filterItemAndFolder = (items) => {
   let folders = []
   let requests = []
 
-  items.forEach((child) => {
-    if (child.hasOwnProperty('request')) {
-      requests.push(child)
+  items.forEach((item) => {
+    if (item.hasOwnProperty('request')) {
+      item.catname = null
+      requests.push(item)
     } else {
-      folders.push(child)
+      folders.push(item)
+
+      // 二级分类中包含接口数据（目前只处理到二级分类，且二级分类会扁平处理为一级分类，yapi 只支持一级分类）
+      const subItems = item.item
+      if (subItems && subItems.length) {
+        subItems.forEach((subItem) => {
+          subItem.catname = item.name
+          requests.push(subItem)
+        })
+      }
     }
   })
 
@@ -143,7 +168,7 @@ const splitItemAndFolder = (items) => {
  */
 const importPostman = (data) => {
   try {
-    const { name, request, response } = data
+    const { name, request, response, catname } = data
     /**
      * header：one of Header List | string
      */
@@ -157,13 +182,14 @@ const importPostman = (data) => {
 
     res.title = name
 
-    res.path = _.isString(url) ? handlePath(url) : handlePath(url.raw)
+    res.path = handleRequestUrl(url)
 
-    res.catname = '' // TODO
+    // 所属分类名
+    res.catname = catname
 
     res.method = method
 
-    res.desc = description
+    res.desc = handleDescription(description)
 
     res.req_query = _.isString(url) ? [] : handleReq_query(url.query)
 
@@ -171,13 +197,11 @@ const importPostman = (data) => {
 
     res.req_headers = _.isString(header) ? [] : handleReq_headers(header)
 
-    // TODO
     res.req_body_type = handleReqBodyType(body, header)
 
     res.req_body_form = handleReq_body_form(body)
 
-    // TODO
-    res.req_body_is_json_schema = _.isString(header) && header.indexOf('application/json') > -1
+    res.req_body_is_json_schema = isContentTypeJson(header)
 
     // response
     res = Object.assign({}, res, handleResponses(response))
@@ -198,7 +222,6 @@ const handleReqParams = (path) => {
         desc: ''
       })
     }
-    // url 后携带参数
     return arr
   }
 
@@ -212,11 +235,23 @@ const handleReqBodyType = (body, header) => {
 
   if (body.mode === 'urlencoded') {
     return 'form'
-  } else if (_.isString(header) && header.indexOf('application/json') > -1) {
+  } else if (isContentTypeJson(header)) {
     return 'json'
   } else {
     return 'raw'
   }
+}
+
+const isContentTypeJson = (header) => {
+  if (_.isString(header)) {
+    return header.indexOf('application/json') > -1
+  }
+
+  if (_.isArray(header) && header.length) {
+    return header.filter((item) => item.key === 'Content-Type' && item.value === 'application/json').length !== 0
+  }
+
+  return false
 }
 
 const handleResponses = (data) => {
@@ -246,19 +281,17 @@ const transformJsonToSchema = (json) => {
   return schemaData
 }
 
-// var cacheFolders = []
-
 function postman(importDataModule) {
   function run(res) {
     try {
       res = JSON.parse(res)
       let interfaceData = { apis: [], cats: [] }
 
-      // 分类和接口列表
-      let { folders, requests } = splitItemAndFolder(res.item)
+      // 筛选接口和分类
+      let { folders, requests } = filterItemAndFolder(res.item)
       requests = checkInterRepeat(requests)
 
-      // 分类 Category
+      // 分类数据
       if (folders && Array.isArray(folders)) {
         folders.forEach((tag) => {
           interfaceData.cats.push({
@@ -266,17 +299,17 @@ function postman(importDataModule) {
             desc: tag.description
           })
         })
-
-        // cacheFolders = folders
       }
 
-      // 转化数据
+      // 转换为需要的接口数据格式
       if (requests && requests.length) {
         for (let key in requests) {
-          let data = importPostman.bind(this)(requests[key])
+          let data = importPostman(requests[key])
           interfaceData.apis.push(data)
         }
       }
+
+      console.log('interfaceData:', interfaceData)
 
       return interfaceData
     } catch (e) {
