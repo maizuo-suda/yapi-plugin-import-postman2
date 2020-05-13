@@ -1,119 +1,11 @@
 import { message } from 'antd'
-import URL from 'url'
 import _ from 'underscore'
-const GenerateSchema = require('generate-schema/src/schemas/json.js')
-import { json_parse } from 'common/utils.js'
-
-const parseUrl = (url) => {
-  return URL.parse(url)
-}
-
-/**
- * 接口去重
- */
-const checkInterRepeat = (requests) => {
-  let obj = {}
-  let arr = []
-
-  for (let i in requests) {
-    const item = requests[i]
-    const { url, method } = item.request
-    const requestUrl = handleRequestUrl(url)
-
-    if (!obj[requestUrl + '-' + method + '-' + method]) {
-      arr.push(item)
-      obj[requestUrl + '-' + method + '-' + method] = true
-    }
-  }
-
-  return arr
-}
-
-/**
- * 重组请求参数
- */
-const handleReq_query = (query) => {
-  let res = []
-  if (query && query.length) {
-    for (let i in query) {
-      res.push({
-        name: query[i].key,
-        value: query[i].value,
-        required: query[i].disabled ? '0' : '1',
-        desc: handleDescription(query[i].description)
-      })
-    }
-  }
-  return res
-}
-
-/**
- * 重组 header
- */
-const handleReq_headers = (headers) => {
-  let res = []
-  if (headers && headers.length) {
-    for (let i in headers) {
-      res.push({
-        name: headers[i].key,
-        value: headers[i].value,
-        required: headers[i].disabled ? '0' : '1',
-        desc: handleDescription(headers[i].description)
-      })
-    }
-  }
-  return res
-}
-
-/**
- * formData 处理
- */
-const handleReq_body_form = (body) => {
-  let res = []
-
-  if (_.isEmpty(body) || _.isEmpty(body.mode) || _.isEmpty(body[body.mode])) {
-    return res
-  }
-
-  const bodyForm = body[body.mode]
-
-  for (let i in bodyForm) {
-    res.push({
-      name: bodyForm[i].key,
-      value: bodyForm[i].value,
-      type: bodyForm[i].type,
-      required: bodyForm[i].disabled ? '0' : '1',
-      desc: handleDescription(bodyForm[i].description)
-    })
-  }
-
-  return res
-}
-
-const handlePath = (path) => {
-  path = parseUrl(path).pathname
-  path = decodeURIComponent(path)
-  if (!path) return ''
-
-  path = path.replace(/\{\{.*\}\}/g, '')
-
-  if (path[0] != '/') {
-    path = '/' + path
-  }
-  return path
-}
-
-const handleRequestUrl = (url) => {
-  return _.isString(url) ? handlePath(url) : handlePath(url.raw)
-}
-
-const handleDescription = (description) => {
-  if (!description) {
-    return ''
-  }
-
-  return _.isObject(description) ? description.content : description
-}
+import { handleReq_headers } from './lib/header'
+import { handleDescription } from './lib/description'
+import { handleRequestUrl } from './lib/path'
+import { handleResponses } from './lib/response'
+import { handleReqBodyType, handleReq_body_form, isContentTypeJson } from './lib/body'
+import { handleReqParams, handleReq_query } from './lib/param'
 
 /**
  * 筛选接口列表和分类列表
@@ -167,6 +59,7 @@ const filterItemAndFolder = (items) => {
  *      'res_body'
  */
 const importPostman = (data) => {
+  console.log('data', data)
   try {
     const { name, request, response, catname } = data
     /**
@@ -182,7 +75,7 @@ const importPostman = (data) => {
 
     res.title = name
 
-    res.path = handleRequestUrl(url)
+    res.path = handleRequestUrl(url, header)
 
     // 所属分类名
     res.catname = catname
@@ -212,75 +105,6 @@ const importPostman = (data) => {
   }
 }
 
-const handleReqParams = (path) => {
-  if (path && path.indexOf('/:') > -1) {
-    let params = path.substr(path.indexOf('/:') + 2).split('/:')
-    let arr = []
-    for (let i in params) {
-      arr.push({
-        name: params[i],
-        desc: ''
-      })
-    }
-    return arr
-  }
-
-  return []
-}
-
-const handleReqBodyType = (body, header) => {
-  if (_.isEmpty(body)) {
-    return 'raw'
-  }
-
-  if (body.mode === 'urlencoded') {
-    return 'form'
-  } else if (isContentTypeJson(header)) {
-    return 'json'
-  } else {
-    return 'raw'
-  }
-}
-
-const isContentTypeJson = (header) => {
-  if (_.isString(header)) {
-    return header.indexOf('application/json') > -1
-  }
-
-  if (_.isArray(header) && header.length) {
-    return header.filter((item) => item.key === 'Content-Type' && item.value === 'application/json').length !== 0
-  }
-
-  return false
-}
-
-const handleResponses = (data) => {
-  if (data && data.length) {
-    let res = data[0]
-    let response = {}
-    response.res_body_type = res._postman_previewlanguage === 'json' ? 'json' : 'raw'
-    if (res._postman_previewlanguage === 'json') {
-      response.res_body_is_json_schema = true
-      response.res_body = transformJsonToSchema(res.body)
-    } else {
-      response.res_body = res.body
-    }
-    return response
-  }
-
-  return {}
-}
-
-const transformJsonToSchema = (json) => {
-  json = json || {}
-  let jsonData = json_parse(json)
-
-  jsonData = GenerateSchema(jsonData)
-
-  let schemaData = JSON.stringify(jsonData)
-  return schemaData
-}
-
 function postman(importDataModule) {
   function run(res) {
     try {
@@ -289,7 +113,6 @@ function postman(importDataModule) {
 
       // 筛选接口和分类
       let { folders, requests } = filterItemAndFolder(res.item)
-      requests = checkInterRepeat(requests)
 
       // 分类数据
       if (folders && Array.isArray(folders)) {
@@ -309,8 +132,6 @@ function postman(importDataModule) {
         }
       }
 
-      console.log('interfaceData:', interfaceData)
-
       return interfaceData
     } catch (e) {
       message.error('文件格式必须为JSON')
@@ -325,7 +146,7 @@ function postman(importDataModule) {
   importDataModule.Postman2 = {
     name: 'Postman2',
     run: run,
-    desc: '注意：只支持json格式数据'
+    desc: 'Postman数据导入（支持 v2.0+）'
   }
 }
 
