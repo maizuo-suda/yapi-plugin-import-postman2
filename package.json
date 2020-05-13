@@ -1,6 +1,6 @@
 {
   "name": "yapi-plugin-import-postman2",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "import postmanV2 plugin for yapi",
   "main": "index.js",
   "scripts": {
